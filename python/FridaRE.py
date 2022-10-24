@@ -272,27 +272,3 @@ class FridaRE:
             sys.stdin.read ()
             self.session.detach ()
                 
-            
-# Takes re environment and dictionary
-# Use re.register (x) to add RPC
-def cb(re, d):
-    pass
-
-if __name__ == '__main__':
-
-    rpc = RPC ('xi_callback', cb)
-    hook_load = HookFn ('LoadLibraryA', ['filename char*', 'void*'])
-
-    load_exit = JSMatch ('filename', regex='.+TheseusEmu.dll$')
-    '''
-    thooks = [HookFn ('XiOpen', ['sig'], lib='TheseusEmu.dll'),
-              HookFn ('XiClose', ['sig'], lib='TheseusEmu.dll')]
-    for hook in thooks:
-        hook.onEnter (rpc)
-        load_exit.add (hook)        
-    '''
-    hook_load.onExit (load_exit)
-    load_exit.add (rpc)
-    hook_load.onEnter (rpc)
-    #print (load_exit)
-    print (hook_load)
