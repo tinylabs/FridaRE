@@ -107,21 +107,24 @@ class RPC (JSObj):
     def __init__(self, name, cb=None, bidir=False):
         super().__init__()
         self.bidir = bidir
-        self.uid = hex (id (self))
+        self.uid = f'{hex (id (self))}'
         self.op = f'op_{random.randint(0,2**32)}'
         self.fn = f'fn_{random.randint(0,2**32)}'
         self.cb = cb
         self.name = name
         # Register with FridaRE global
         FridaRE.register (self.uid, self)
-        
+
+    def isBiDir(self):
+        return self.isBiDir
+    
     def send(self):
         ''' Generate code to send JSON from JS => python '''
         self.vlist = self.getSyms ()
         args =  self.vlist.copy()
-        args.insert (0, ['id', f'{self.uid}'])
+        args.insert (0, ['id', f'\'{self.uid}\''])
         args.insert (1, ['name', f'\'{self.name}\''])
-        code = [f'\'{nm}\',{var}' for nm, var in args]
+        code = [f'\'{nm}\':{var}' for nm, var in args]
         code = '{' + ','.join (code) + '}'
         code = f'send(JSON.stringify({code}));\n'
         return code
@@ -177,7 +180,7 @@ class HookFn (JSExportSyms):
     def __init__(self, fn, sigs, lib=None):
         self.enter_obj = None
         self.exit_obj = None
-        self.lib = f'\'{lib}\'' if lib != None else 'none'
+        self.lib = f'\'{lib}\'' if lib != None else 'null'
         self.lib_var = f'hook_{random.randint(0, 2**32)}'
         self.hdr = f'let {self.lib_var} = Module.findExportByName ({self.lib}, \'{fn}\');\n'
         self.hdr += f'Interceptor.attach ({self.lib_var}, {{\n'
@@ -254,7 +257,7 @@ class FridaRE:
             d = json.loads (message['payload'])
             # Get object ID
             uid = d['id']
-            obj = Frida.objs[uid]
+            obj = FridaRE.objs[uid]
             del d['id']
             # Call callback
             resp = obj._callback (d)
@@ -264,11 +267,11 @@ class FridaRE:
         else:
             print("[%s] => %s" % (message, data))
 
-        def run (self, obj):
-            self.script = self.session.create_script (str (obj))
-            self.script.on ('message', self.onMessage)
-            self.script.load ()
-            print("[!] Ctrl+Z/Ctrl+D to detach\n")
-            sys.stdin.read ()
-            self.session.detach ()
+    def run (self, obj):
+        self.script = self.session.create_script (str (obj))
+        self.script.on ('message', self.onMessage)
+        self.script.load ()
+        print("[!] Ctrl+Z/Ctrl+D to detach\n")
+        sys.stdin.read ()
+        self.session.detach ()
                 
