@@ -170,19 +170,28 @@ class JSVar:
         pass
     
     @staticmethod
-    def Read (type_str):
+    def Read (arg, type_str):
         if type_str == 'char*':
-            return 'Memory.readCString'
+            return f'Memory.readCString({arg})'
         elif type_str == 'void*':
-            return 'ptr'
+            return f'ptr({arg})'
+        else:
+            return f'{arg}.toInt32()'
         
 class HookFn (JSExportSyms):
-    def __init__(self, fn, sigs, lib=None):
+    def __init__(self, fn, sigs, fn_addr=None, lib=None):
         self.enter_obj = None
         self.exit_obj = None
-        self.lib = f'\'{lib}\'' if lib != None else 'null'
         self.lib_var = f'hook_{random.randint(0, 2**32)}'
-        self.hdr = f'let {self.lib_var} = Module.findExportByName ({self.lib}, \'{fn}\');\n'
+        self.hdr = ''
+        # Use return val of previous libload to get library
+        if lib and (lib[0:3] == 'ptr'):
+            self.hdr += f'let {self.lib_var} = Process.getModuleByAddress({lib})\n'
+            self.hdr += f'.findExportByName (\'{fn}\');\n'
+        # Use explicit library
+        else:
+            self.lib = f'\'{lib}\'' if lib != None else 'null'
+            self.hdr += f'let {self.lib_var} = Module.findExportByName ({self.lib}, \'{fn}\');\n'
         self.hdr += f'Interceptor.attach ({self.lib_var}, {{\n'
         self.hdr += 'onEnter (args) {\n'
         self.bdy = '\n},\nonLeave (retval) {\n'
@@ -190,6 +199,7 @@ class HookFn (JSExportSyms):
         self.sigs = [sig.split(' ') for sig in sigs]
         # Add return val
         self.sigs[len (self.sigs)-1].insert (0, 'retval')
+        self.fn = fn
         
     def onEnter(self, obj):
         self.enter_obj = obj
@@ -202,34 +212,36 @@ class HookFn (JSExportSyms):
         return []
     
     def enterSyms(self):
-        return [[nm, f'this.{nm}'] for nm, sig in self.sigs[:-1]]
-
+        _  = [[nm, f'this.{nm}'] for nm, sig in self.sigs[:-1]]
+        _.insert (0, ['fn', f'\'{self.fn}\''])
+        return _
+    
     def exitSyms(self):
         return self.enterSyms() + [[f'{self.sigs[-1][0]}', f'this.{self.sigs[-1][0]}']]
 
     def genOnEnter(self):
         _ = ''
         for n, sig in enumerate (self.sigs[:-1]):
-            access = JSVar.Read(sig[1])
-            _ += f'this.{sig[0]} = {access}(args[{n}]);\n'
+            access = JSVar.Read(f'args[{n}]', sig[1])
+            _ += f'this.{sig[0]} = {access};\n'
         return _
     
     def genOnExit(self):
         sig = self.sigs[-1]
-        access = JSVar.Read(sig[1])
-        return f'this.{sig[0]} = {access}(retval);\n'
+        access = JSVar.Read('retval', sig[1])
+        return f'this.{sig[0]} = {access};\n'
     
     def __str__(self):
         _ = self.header()
         syms = self.exportSyms ()
+        _ += self.genOnEnter ()
         if self.enter_obj:
-            _ += self.genOnEnter ()
             self.enter_obj.setSyms (self.enterSyms())
             _ += str(self.enter_obj)
             self.enter_obj.clearSyms ()
         _ += self.body ()
+        _ += self.genOnExit ()
         if self.exit_obj:
-            _ += self.genOnExit ()
             self.exit_obj.setSyms (self.exitSyms())
             _ += str(self.exit_obj)
             self.exit_obj.clearSyms ()
@@ -260,10 +272,14 @@ class FridaRE:
             obj = FridaRE.objs[uid]
             del d['id']
             # Call callback
-            resp = obj._callback (d)
-            # Send response if bidirectional
+            respObj = obj._callback (d)
+            # Send response object to execute if bidirectional
             if obj.isBiDir ():
-                self.script.post ({'type' : uid, 'payload' : resp})
+                if respObj:
+                    self.script.post ({'type' : uid, 'payload' : str(respObj)})
+                else:
+                    # Send empty script to keep unblock process
+                    self.script.post ({'type' : uid, 'payload' : ''})
         else:
             print("[%s] => %s" % (message, data))
 
